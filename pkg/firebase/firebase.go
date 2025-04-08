@@ -217,11 +217,13 @@ func (c *Client) ListenForMessages(roomID string, msgChan chan Message) {
 		var processedMsgIDs = make(map[string]bool)
 		var messageCount int = 0
 
-		// Get initial timestamp from the most recent message
+		// Get all messages initially to find the most recent timestamp
 		messagesRef := c.db.NewRef("rooms").Child(roomID).Child("messages")
 		var initialMessages map[string]Message
-		if err := messagesRef.OrderByChild("timestamp").LimitToLast(1).Get(c.ctx, &initialMessages); err == nil {
+		if err := messagesRef.Get(c.ctx, &initialMessages); err == nil {
 			fmt.Printf("Initial message query returned %d messages\n", len(initialMessages))
+			
+			// Process all initial messages to find the latest timestamp
 			for msgID, msg := range initialMessages {
 				fmt.Printf("Initial message ID: %s, Timestamp: %d\n", msgID, msg.Timestamp)
 				if msg.Timestamp > lastTimestamp {
@@ -232,20 +234,12 @@ func (c *Client) ListenForMessages(roomID string, msgChan chan Message) {
 			}
 		}
 
-		// Add a small buffer to avoid missing messages with the same timestamp
-		// but don't add buffer on first run to get all messages
-		if lastTimestamp > 0 {
-			lastTimestamp -= 1 // Subtract 1 second to catch messages with the same timestamp
-		}
-
 		fmt.Printf("Starting message listener with lastTimestamp: %d\n", lastTimestamp)
 
 		for {
-			// Query messages with timestamp >= lastTimestamp to catch all messages
-			query := messagesRef.OrderByChild("timestamp").StartAt(lastTimestamp)
-
+			// Get all messages and filter in memory instead of using Firebase queries
 			var messages map[string]Message
-			if err := query.Get(c.ctx, &messages); err == nil {
+			if err := messagesRef.Get(c.ctx, &messages); err == nil {
 				fmt.Printf("Query returned %d messages\n", len(messages))
 				
 				if len(messages) > 0 {
@@ -257,6 +251,11 @@ func (c *Client) ListenForMessages(roomID string, msgChan chan Message) {
 					for msgID, msg := range messages {
 						// Skip already processed messages
 						if processedMsgIDs[msgID] {
+							continue
+						}
+
+						// Skip messages with timestamps older than our last processed timestamp
+						if msg.Timestamp <= lastTimestamp && lastTimestamp > 0 {
 							continue
 						}
 
@@ -286,7 +285,7 @@ func (c *Client) ListenForMessages(roomID string, msgChan chan Message) {
 					}
 
 					// Update lastTimestamp for next query
-					lastTimestamp = maxTimestamp + 1 // Add 1 to avoid getting the same messages again
+					lastTimestamp = maxTimestamp
 					
 					// Periodically clean up the processedMsgIDs map to prevent memory leaks
 					if len(processedMsgIDs) > 1000 {
