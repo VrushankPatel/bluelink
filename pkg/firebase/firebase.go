@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sort"
 	"strconv"
 	"time"
 
@@ -213,24 +214,89 @@ func (c *Client) SendMessage(roomID, userID, username, color, text string) error
 func (c *Client) ListenForMessages(roomID string, msgChan chan Message) {
 	go func() {
 		var lastTimestamp int64 = 0
-		for {
-			// Query messages newer than the last seen timestamp
-			messagesRef := c.db.NewRef("rooms").Child(roomID).Child("messages")
-			query := messagesRef.OrderByChild("timestamp")
-			if lastTimestamp > 0 {
-				query = query.StartAt(lastTimestamp + 1) // +1 to avoid duplicate messages
+		var processedMsgIDs = make(map[string]bool)
+		var messageCount int = 0
+
+		// Get initial timestamp from the most recent message
+		messagesRef := c.db.NewRef("rooms").Child(roomID).Child("messages")
+		var initialMessages map[string]Message
+		if err := messagesRef.OrderByChild("timestamp").LimitToLast(1).Get(c.ctx, &initialMessages); err == nil {
+			fmt.Printf("Initial message query returned %d messages\n", len(initialMessages))
+			for msgID, msg := range initialMessages {
+				fmt.Printf("Initial message ID: %s, Timestamp: %d\n", msgID, msg.Timestamp)
+				if msg.Timestamp > lastTimestamp {
+					lastTimestamp = msg.Timestamp
+				}
+				// Mark this message as processed
+				processedMsgIDs[msgID] = true
 			}
-			query = query.LimitToLast(100)
+		}
+
+		// Add a small buffer to avoid missing messages with the same timestamp
+		// but don't add buffer on first run to get all messages
+		if lastTimestamp > 0 {
+			lastTimestamp -= 1 // Subtract 1 second to catch messages with the same timestamp
+		}
+
+		fmt.Printf("Starting message listener with lastTimestamp: %d\n", lastTimestamp)
+
+		for {
+			// Query messages with timestamp >= lastTimestamp to catch all messages
+			query := messagesRef.OrderByChild("timestamp").StartAt(lastTimestamp)
 
 			var messages map[string]Message
-			if err := query.Get(c.ctx, &messages); err == nil && len(messages) > 0 {
-				// Process new messages
-				for _, msg := range messages {
-					if msg.Timestamp > lastTimestamp {
-						lastTimestamp = msg.Timestamp
+			if err := query.Get(c.ctx, &messages); err == nil {
+				fmt.Printf("Query returned %d messages\n", len(messages))
+				
+				if len(messages) > 0 {
+					// Convert map to slice for sorting
+					var orderedMsgs []Message
+					var maxTimestamp int64 = lastTimestamp
+
+					// Process messages and track message IDs to avoid duplicates
+					for msgID, msg := range messages {
+						// Skip already processed messages
+						if processedMsgIDs[msgID] {
+							continue
+						}
+
+						// Track this message as processed
+						processedMsgIDs[msgID] = true
+						orderedMsgs = append(orderedMsgs, msg)
+
+						// Update max timestamp
+						if msg.Timestamp > maxTimestamp {
+							maxTimestamp = msg.Timestamp
+						}
+					}
+
+					fmt.Printf("Found %d new messages to process\n", len(orderedMsgs))
+
+					// Sort messages by timestamp
+					sort.Slice(orderedMsgs, func(i, j int) bool {
+						return orderedMsgs[i].Timestamp < orderedMsgs[j].Timestamp
+					})
+
+					// Send each new message to the channel
+					for _, msg := range orderedMsgs {
 						msgChan <- msg
+						// Debug output to confirm messages are being sent
+						messageCount++
+						fmt.Printf("Sent message %d: %s: %s\n", messageCount, msg.Sender, msg.Text)
+					}
+
+					// Update lastTimestamp for next query
+					lastTimestamp = maxTimestamp + 1 // Add 1 to avoid getting the same messages again
+					
+					// Periodically clean up the processedMsgIDs map to prevent memory leaks
+					if len(processedMsgIDs) > 1000 {
+						fmt.Printf("Cleaning up processedMsgIDs map (size: %d)\n", len(processedMsgIDs))
+						// Reset the map when it gets too large
+						processedMsgIDs = make(map[string]bool)
 					}
 				}
+			} else if err != nil {
+				fmt.Printf("Error querying messages: %v\n", err)
 			}
 
 			// Sleep before polling again
@@ -281,4 +347,81 @@ func (c *Client) UpdateActivity(roomID, userID string) error {
 	}
 
 	return nil
+}
+
+// CheckRoomExists checks if a room with the given ID exists
+func (c *Client) CheckRoomExists(roomID string) (bool, error) {
+	roomRef := c.db.NewRef("rooms").Child(roomID)
+	var roomData map[string]interface{}
+	if err := roomRef.Get(c.ctx, &roomData); err != nil {
+		return false, fmt.Errorf("failed to check room: %w", err)
+	}
+	return roomData != nil, nil
+}
+
+// CreateRoomWithID creates a new chat room with the specified ID
+func (c *Client) CreateRoomWithID(roomID, userID, username, color string) error {
+	// Create room with initial participant
+	roomRef := c.db.NewRef("rooms").Child(roomID)
+
+	// Add creator as first participant
+	participant := Participant{
+		Name:       username,
+		Color:      color,
+		LastActive: time.Now().Unix(),
+	}
+
+	err := roomRef.Child("participants").Child(userID).Set(c.ctx, participant)
+	if err != nil {
+		return fmt.Errorf("failed to create room: %w", err)
+	}
+
+	// Add system message
+	welcomeMsg := Message{
+		Sender:    "System",
+		SenderID:  "system",
+		Color:     "#888888",
+		Text:      fmt.Sprintf("%s created the room", username),
+		Timestamp: time.Now().Unix(),
+	}
+
+	_, err = roomRef.Child("messages").Push(c.ctx, welcomeMsg)
+	if err != nil {
+		return fmt.Errorf("failed to add system message: %w", err)
+	}
+
+	return nil
+}
+
+// GetInitialMessages gets the most recent messages from a room
+func (c *Client) GetInitialMessages(roomID string) ([]Message, error) {
+	messagesRef := c.db.NewRef("rooms").Child(roomID).Child("messages")
+	
+	// Instead of querying by timestamp which requires an index,
+	// just get all messages and sort them in memory
+	var messagesMap map[string]Message
+	if err := messagesRef.Get(c.ctx, &messagesMap); err != nil {
+		return nil, fmt.Errorf("failed to get initial messages: %w", err)
+	}
+
+	// If no messages found, return empty slice instead of nil
+	if len(messagesMap) == 0 {
+		return []Message{}, nil
+	}
+
+	// Debug output to help diagnose issues
+	fmt.Printf("Retrieved %d initial messages from Firebase\n", len(messagesMap))
+	
+	var messages []Message
+	for msgID, msg := range messagesMap {
+		fmt.Printf("Message ID: %s, Sender: %s, Text: %s\n", msgID, msg.Sender, msg.Text)
+		messages = append(messages, msg)
+	}
+
+	// Sort messages by timestamp
+	sort.Slice(messages, func(i, j int) bool {
+		return messages[i].Timestamp < messages[j].Timestamp
+	})
+
+	return messages, nil
 }

@@ -85,23 +85,33 @@ func NewChatUI(roomID, username, userID, userColor string, fb *firebase.Client) 
 	partChan := make(chan map[string]firebase.Participant)
 
 	m := &ChatModel{
-		roomID:      roomID,
-		username:    username,
-		userID:      userID,
-		userColor:   userColor,
-		msgViewport: msgViewport,
-		inputArea:   ta,
-		messages:    []firebase.Message{},
-		firebase:    fb,
-		msgChan:     msgChan,
-		partChan:    partChan,
+		roomID:       roomID,
+		username:     username,
+		userID:       userID,
+		userColor:    userColor,
+		msgViewport:  msgViewport,
+		inputArea:    ta,
+		messages:     []firebase.Message{},
+		firebase:     fb,
+		msgChan:      msgChan,
+		partChan:     partChan,
 		participants: map[string]firebase.Participant{},
-		helpOpen:    false,
+		helpOpen:     false,
 	}
 
 	// Join the room
 	if err := fb.JoinRoom(roomID, userID, username, userColor); err != nil {
 		return nil, fmt.Errorf("failed to join room: %w", err)
+	}
+
+	// Load initial messages
+	initialMsgs, err := fb.GetInitialMessages(roomID)
+	if err != nil {
+		// Just log the error but continue - this isn't fatal
+		fmt.Printf("Warning: Could not load initial messages: %v\n", err)
+	} else {
+		m.messages = initialMsgs
+		m.updateMessages()
 	}
 
 	// Start listeners
@@ -146,9 +156,9 @@ func (m ChatModel) keepAlive() tea.Cmd {
 // Update handles UI updates
 func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
-		tiCmd  tea.Cmd
-		vpCmd  tea.Cmd
-		cmds   []tea.Cmd
+		tiCmd tea.Cmd
+		vpCmd tea.Cmd
+		cmds  []tea.Cmd
 	)
 
 	switch msg := msg.(type) {
@@ -239,13 +249,10 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.inputArea, tiCmd = m.inputArea.Update(msg)
 	cmds = append(cmds, tiCmd)
 
-	// Ensure we keep listening for messages and participants
-	if _, ok := msg.(firebase.Message); !ok {
-		cmds = append(cmds, m.waitForMessages())
-	}
-	if _, ok := msg.(map[string]firebase.Participant); !ok {
-		cmds = append(cmds, m.waitForParticipants())
-	}
+	// Always ensure we keep listening for messages and participants
+	// This is critical - we must always reattach these commands
+	cmds = append(cmds, m.waitForMessages())
+	cmds = append(cmds, m.waitForParticipants())
 
 	// Keep updating activity status
 	cmds = append(cmds, m.keepAlive())
@@ -257,7 +264,10 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *ChatModel) updateMessages() {
 	var sb strings.Builder
 
-	for _, msg := range m.messages {
+	// Debug output to help diagnose issues
+	fmt.Printf("Updating messages view with %d messages\n", len(m.messages))
+
+	for i, msg := range m.messages {
 		// Format timestamp
 		timestamp := time.Unix(msg.Timestamp, 0).Format("15:04:05")
 		timeStr := timestampStyle.Render(timestamp)
@@ -269,10 +279,23 @@ func (m *ChatModel) updateMessages() {
 		// Combine all parts
 		messageText := fmt.Sprintf("%s %s: %s\n", timeStr, senderStr, msg.Text)
 		sb.WriteString(messageText)
+
+		// Debug output for the first and last few messages
+		if i < 3 || i >= len(m.messages)-3 {
+			fmt.Printf("Message %d: %s %s: %s\n", i, timestamp, msg.Sender, msg.Text)
+		}
 	}
 
-	m.msgViewport.SetContent(sb.String())
+	// Update content and ensure we're at the bottom to see new messages
+	content := sb.String()
+	m.msgViewport.SetContent(content)
 	m.msgViewport.GotoBottom()
+	
+	// Force viewport to update immediately
+	m.msgViewport.Update(nil)
+	
+	// Force viewport to update immediately
+	m.msgViewport.Update(nil)
 }
 
 // formatParticipants returns a formatted string of participants
@@ -363,4 +386,4 @@ func (m *ChatModel) Run() error {
 
 	_, err := p.Run()
 	return err
-} 
+}
