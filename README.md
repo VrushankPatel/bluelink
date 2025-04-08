@@ -32,6 +32,44 @@ The application uses Firebase Realtime Database for:
 - Activity tracking
 - Room persistence
 
+### Real-time Updates Implementation
+
+Bluelink uses a polling mechanism to provide real-time updates from Firebase:
+
+- Messages are retrieved using Firebase queries with timestamp filtering
+- Participant updates are monitored by tracking activity timestamps
+- Regular polling intervals ensure timely updates (500ms for messages, 1s for participants)
+- This approach provides compatibility with the Firebase Go Admin SDK while maintaining responsiveness
+
+## CI/CD
+
+The project uses GitHub Actions for continuous integration and delivery:
+
+```yaml
+# .github/workflows/go.yml
+name: Go
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23.4'
+    - name: Build
+      run: go build -v ./...
+    - name: Test
+      run: go test -v ./...
+```
+
 ## Installation
 
 ### Prerequisites
@@ -197,6 +235,14 @@ For terminal display issues:
 2. Try adjusting your terminal window size
 3. Check that your terminal supports ANSI color codes
 
+### Build Issues
+
+If you encounter build errors related to Firebase:
+
+1. Ensure you're using a compatible Go version (1.16+)
+2. The Firebase Go Admin SDK has some limitations regarding real-time listeners
+3. Bluelink uses a polling mechanism for compatibility with all Firebase SDK versions
+
 ### Error Messages
 
 Common error messages and solutions:
@@ -221,6 +267,9 @@ bluelink/
 │   │   └── firebase.go
 │   └── ui/              # Terminal UI
 │       └── ui.go
+├── .github/
+│   └── workflows/       # CI/CD workflows
+│       └── go.yml       # GitHub Actions workflow
 ├── go.mod               # Go module definition
 ├── go.sum               # Go module checksums
 ├── firebase-credentials.json  # Firebase credentials (example)

@@ -209,32 +209,64 @@ func (c *Client) SendMessage(roomID, userID, username, color, text string) error
 	return nil
 }
 
-// ListenForMessages sets up a real-time listener for messages
+// ListenForMessages sets up a polling mechanism for messages
 func (c *Client) ListenForMessages(roomID string, msgChan chan Message) {
-	messagesRef := c.db.NewRef("rooms").Child(roomID).Child("messages")
-	messagesRef.OrderByChild("timestamp").LimitToLast(100).Listen(c.ctx, func(event db.Event) {
-		// Only process new child events
-		if event.Type == db.EventTypeChildAdded {
-			var msg Message
-			if err := event.Snapshot.Unmarshal(&msg); err == nil {
-				msgChan <- msg
+	go func() {
+		var lastTimestamp int64 = 0
+		for {
+			// Query messages newer than the last seen timestamp
+			messagesRef := c.db.NewRef("rooms").Child(roomID).Child("messages")
+			query := messagesRef.OrderByChild("timestamp")
+			if lastTimestamp > 0 {
+				query = query.StartAt(lastTimestamp + 1) // +1 to avoid duplicate messages
 			}
+			query = query.LimitToLast(100)
+
+			var messages map[string]Message
+			if err := query.Get(c.ctx, &messages); err == nil && len(messages) > 0 {
+				// Process new messages
+				for _, msg := range messages {
+					if msg.Timestamp > lastTimestamp {
+						lastTimestamp = msg.Timestamp
+						msgChan <- msg
+					}
+				}
+			}
+
+			// Sleep before polling again
+			time.Sleep(500 * time.Millisecond)
 		}
-	})
+	}()
 }
 
-// ListenForParticipants sets up a real-time listener for participants
+// ListenForParticipants sets up a polling mechanism for participants
 func (c *Client) ListenForParticipants(roomID string, partChan chan map[string]Participant) {
-	participantsRef := c.db.NewRef("rooms").Child(roomID).Child("participants")
-	participantsRef.Listen(c.ctx, func(event db.Event) {
-		// Process all participant events
-		if event.Type == db.EventTypeValue {
-			participants := make(map[string]Participant)
-			if err := event.Snapshot.Unmarshal(&participants); err == nil {
-				partChan <- participants
+	go func() {
+		var lastUpdate int64 = 0
+		for {
+			// Query participants
+			participantsRef := c.db.NewRef("rooms").Child(roomID).Child("participants")
+			var participants map[string]Participant
+			if err := participantsRef.Get(c.ctx, &participants); err == nil {
+				// Check if anything has changed
+				var maxTimestamp int64 = 0
+				for _, p := range participants {
+					if p.LastActive > maxTimestamp {
+						maxTimestamp = p.LastActive
+					}
+				}
+
+				// If we have new activity, send update
+				if maxTimestamp > lastUpdate || lastUpdate == 0 {
+					lastUpdate = maxTimestamp
+					partChan <- participants
+				}
 			}
+
+			// Sleep before polling again
+			time.Sleep(1 * time.Second)
 		}
-	})
+	}()
 }
 
 // UpdateActivity updates the user's last active timestamp
