@@ -83,14 +83,14 @@ func (c *Client) CreateRoom(userID, username, color string) (string, error) {
 
 	// Create room with initial participant
 	roomRef := c.db.NewRef("rooms").Child(roomID)
-	
+
 	// Add creator as first participant
 	participant := Participant{
 		Name:       username,
 		Color:      color,
 		LastActive: time.Now().Unix(),
 	}
-	
+
 	err := roomRef.Child("participants").Child(userID).Set(c.ctx, participant)
 	if err != nil {
 		return "", fmt.Errorf("failed to create room: %w", err)
@@ -104,7 +104,7 @@ func (c *Client) CreateRoom(userID, username, color string) (string, error) {
 		Text:      fmt.Sprintf("%s created the room", username),
 		Timestamp: time.Now().Unix(),
 	}
-	
+
 	_, err = roomRef.Child("messages").Push(c.ctx, welcomeMsg)
 	if err != nil {
 		return "", fmt.Errorf("failed to add system message: %w", err)
@@ -117,8 +117,8 @@ func (c *Client) CreateRoom(userID, username, color string) (string, error) {
 func (c *Client) JoinRoom(roomID, userID, username, color string) error {
 	// Check if room exists
 	roomRef := c.db.NewRef("rooms").Child(roomID)
-	var exists bool
-	if err := roomRef.Get(c.ctx, &exists); err != nil || !exists {
+	var roomData map[string]interface{}
+	if err := roomRef.Get(c.ctx, &roomData); err != nil || roomData == nil {
 		return errors.New("room does not exist")
 	}
 
@@ -128,7 +128,7 @@ func (c *Client) JoinRoom(roomID, userID, username, color string) error {
 		Color:      color,
 		LastActive: time.Now().Unix(),
 	}
-	
+
 	if err := roomRef.Child("participants").Child(userID).Set(c.ctx, participant); err != nil {
 		return fmt.Errorf("failed to join room: %w", err)
 	}
@@ -141,7 +141,7 @@ func (c *Client) JoinRoom(roomID, userID, username, color string) error {
 		Text:      fmt.Sprintf("%s joined the room", username),
 		Timestamp: time.Now().Unix(),
 	}
-	
+
 	_, err := roomRef.Child("messages").Push(c.ctx, joinMsg)
 	if err != nil {
 		return fmt.Errorf("failed to add system message: %w", err)
@@ -167,7 +167,7 @@ func (c *Client) LeaveRoom(roomID, userID string) error {
 		Text:      fmt.Sprintf("%s left the room", participant.Name),
 		Timestamp: time.Now().Unix(),
 	}
-	
+
 	_, err := c.db.NewRef("rooms").Child(roomID).Child("messages").Push(c.ctx, leaveMsg)
 	if err != nil {
 		return fmt.Errorf("failed to add system message: %w", err)
@@ -190,7 +190,7 @@ func (c *Client) SendMessage(roomID, userID, username, color, text string) error
 		Text:      text,
 		Timestamp: time.Now().Unix(),
 	}
-	
+
 	_, err := c.db.NewRef("rooms").Child(roomID).Child("messages").Push(c.ctx, message)
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
@@ -200,7 +200,7 @@ func (c *Client) SendMessage(roomID, userID, username, color, text string) error
 	lastActive := map[string]interface{}{
 		"lastActive": time.Now().Unix(),
 	}
-	
+
 	err = c.db.NewRef("rooms").Child(roomID).Child("participants").Child(userID).Update(c.ctx, lastActive)
 	if err != nil {
 		return fmt.Errorf("failed to update activity: %w", err)
@@ -274,11 +274,11 @@ func (c *Client) UpdateActivity(roomID, userID string) error {
 	lastActive := map[string]interface{}{
 		"lastActive": time.Now().Unix(),
 	}
-	
+
 	err := c.db.NewRef("rooms").Child(roomID).Child("participants").Child(userID).Update(c.ctx, lastActive)
 	if err != nil {
 		return fmt.Errorf("failed to update activity: %w", err)
 	}
 
 	return nil
-} 
+}
