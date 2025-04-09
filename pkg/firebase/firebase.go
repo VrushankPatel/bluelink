@@ -184,15 +184,21 @@ func (c *Client) LeaveRoom(roomID, userID string) error {
 
 // SendMessage sends a message to the chat room
 func (c *Client) SendMessage(roomID, userID, username, color, text string) error {
+	// Encrypt the message text
+	encryptedText, err := encrypt(text, roomID)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt message: %w", err)
+	}
+
 	message := Message{
 		Sender:    username,
 		SenderID:  userID,
 		Color:     color,
-		Text:      text,
+		Text:      encryptedText, // Store encrypted text
 		Timestamp: time.Now().Unix(),
 	}
 
-	_, err := c.db.NewRef("rooms").Child(roomID).Child("messages").Push(c.ctx, message)
+	_, err = c.db.NewRef("rooms").Child(roomID).Child("messages").Push(c.ctx, message)
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
@@ -208,6 +214,24 @@ func (c *Client) SendMessage(roomID, userID, username, color, text string) error
 	}
 
 	return nil
+}
+
+// decryptMessage decrypts a message's text field
+func (c *Client) decryptMessage(msg Message, roomID string) Message {
+	// Don't decrypt system messages
+	if msg.SenderID == "system" {
+		return msg
+	}
+
+	decryptedText, err := decrypt(msg.Text, roomID)
+	if err != nil {
+		// If decryption fails, return a message indicating the error
+		msg.Text = "[Failed to decrypt message]"
+		return msg
+	}
+
+	msg.Text = decryptedText
+	return msg
 }
 
 // ListenForMessages sets up a polling mechanism for messages
@@ -253,6 +277,9 @@ func (c *Client) ListenForMessages(roomID string, msgChan chan Message) {
 
 						// Track this message as processed
 						processedMsgIDs[msgID] = true
+
+						// Decrypt the message before adding it
+						msg = c.decryptMessage(msg, roomID)
 						orderedMsgs = append(orderedMsgs, msg)
 
 						// Update max timestamp
@@ -393,6 +420,8 @@ func (c *Client) GetInitialMessages(roomID string) ([]Message, error) {
 
 	var messages []Message
 	for _, msg := range messagesMap {
+		// Decrypt message before adding it to the list
+		msg = c.decryptMessage(msg, roomID)
 		messages = append(messages, msg)
 	}
 
