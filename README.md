@@ -329,4 +329,3 @@ Please make sure to update tests as appropriate and follow the existing code sty
 
 - [Bubble Tea](https://github.com/charmbracelet/bubbletea) for the terminal UI framework
 - [Firebase](https://firebase.google.com) for the real-time database
-- All contributors and users of Bluelink 
