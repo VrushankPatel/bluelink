@@ -23,8 +23,7 @@ var (
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Background(lipgloss.Color("#2774AE")).
 			PaddingLeft(1).
-			PaddingRight(1).
-			Width(100)
+			PaddingRight(1)
 
 	participantsHeaderStyle = lipgloss.NewStyle().
 				Bold(true).
@@ -36,8 +35,7 @@ var (
 	inputStyle = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#2774AE")).
-			PaddingLeft(1).
-			Width(100)
+			PaddingLeft(1)
 
 	timestampStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#999999")).
@@ -47,6 +45,13 @@ var (
 			Foreground(lipgloss.Color("#999999")).
 			Italic(true).
 			PaddingLeft(1)
+
+	mainChatStyle = lipgloss.NewStyle().
+			Width(85)
+
+	participantsPanelStyle = lipgloss.NewStyle().
+				Width(30).
+				PaddingLeft(1)
 )
 
 // ChatModel is the main TUI model
@@ -64,19 +69,29 @@ type ChatModel struct {
 	partChan     chan map[string]firebase.Participant
 	helpOpen     bool
 	quitting     bool
+	width        int
+	height       int
 }
 
 // NewChatUI creates a new chat UI
 func NewChatUI(roomID, username, userID, userColor string, fb *firebase.Client) (*ChatModel, error) {
+	// Get terminal size - default to reasonable values if can't detect
+	width := 120 // default width
+	height := 40 // default height
+
+	// Calculate dimensions
+	mainWidth := int(float64(width) * 0.75) // Main chat takes 75% of width
+	viewportHeight := height - 4            // Reserve space for header and input
+
 	// Set up viewport for messages
-	msgViewport := viewport.New(100, 30)
+	msgViewport := viewport.New(mainWidth, viewportHeight)
 	msgViewport.Style = borderStyle
 
 	// Set up textarea for input
 	ta := textarea.New()
 	ta.Placeholder = "Type a message and press Enter to send..."
 	ta.CharLimit = 1000
-	ta.SetWidth(98)
+	ta.SetWidth(mainWidth - 2) // Account for borders
 	ta.SetHeight(1)
 	ta.Focus()
 
@@ -97,18 +112,19 @@ func NewChatUI(roomID, username, userID, userColor string, fb *firebase.Client) 
 		partChan:     partChan,
 		participants: map[string]firebase.Participant{},
 		helpOpen:     false,
+		width:        width,
+		height:       height,
 	}
 
-	// Join the room
+	// Join the room silently (no debug output)
 	if err := fb.JoinRoom(roomID, userID, username, userColor); err != nil {
 		return nil, fmt.Errorf("failed to join room: %w", err)
 	}
 
-	// Load initial messages
+	// Load initial messages silently
 	initialMsgs, err := fb.GetInitialMessages(roomID)
 	if err != nil {
-		// Just log the error but continue - this isn't fatal
-		fmt.Printf("Warning: Could not load initial messages: %v\n", err)
+		m.messages = []firebase.Message{}
 	} else {
 		m.messages = initialMsgs
 		m.updateMessages()
@@ -155,13 +171,25 @@ func (m ChatModel) keepAlive() tea.Cmd {
 
 // Update handles UI updates
 func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var (
-		tiCmd tea.Cmd
-		vpCmd tea.Cmd
-		cmds  []tea.Cmd
-	)
+	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		// Update dimensions when window is resized
+		m.width = msg.Width
+		m.height = msg.Height
+
+		// Recalculate viewport and input dimensions
+		mainWidth := int(float64(m.width) * 0.75)
+		viewportHeight := m.height - 4
+
+		m.msgViewport.Width = mainWidth
+		m.msgViewport.Height = viewportHeight
+		m.inputArea.SetWidth(mainWidth - 2)
+
+		// Make sure viewport content is updated with new dimensions
+		m.updateMessages()
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
@@ -187,7 +215,7 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.helpOpen = !m.helpOpen
 				case "/clear":
 					m.messages = []firebase.Message{}
-					m.msgViewport.SetContent("")
+					m.updateMessages()
 				case "/exit":
 					m.firebase.LeaveRoom(m.roomID, m.userID)
 					m.quitting = true
@@ -203,17 +231,8 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					})
 				}
 			} else {
-				// Send regular message
-				err := m.firebase.SendMessage(m.roomID, m.userID, m.username, m.userColor, messageText)
-				if err != nil {
-					m.messages = append(m.messages, firebase.Message{
-						Sender:    "System",
-						SenderID:  "system",
-						Color:     "#888888",
-						Text:      fmt.Sprintf("Error sending message: %v", err),
-						Timestamp: time.Now().Unix(),
-					})
-				}
+				// Send regular message silently
+				_ = m.firebase.SendMessage(m.roomID, m.userID, m.username, m.userColor, messageText)
 			}
 
 			m.inputArea.Reset()
@@ -229,33 +248,26 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case firebase.Message:
-		// New message received
+		// New message received silently
 		m.messages = append(m.messages, msg)
 		m.updateMessages()
 		cmds = append(cmds, m.waitForMessages())
 
 	case map[string]firebase.Participant:
-		// Participant list updated
+		// Participant list updated silently
 		m.participants = msg
-		m.updateMessages()
 		cmds = append(cmds, m.waitForParticipants())
 	}
 
-	// Handle viewport update
-	m.msgViewport, vpCmd = m.msgViewport.Update(msg)
-	cmds = append(cmds, vpCmd)
+	// Handle viewport and textarea updates
+	var cmd tea.Cmd
+	m.msgViewport, cmd = m.msgViewport.Update(msg)
+	cmds = append(cmds, cmd)
+	m.inputArea, cmd = m.inputArea.Update(msg)
+	cmds = append(cmds, cmd)
 
-	// Handle textarea update
-	m.inputArea, tiCmd = m.inputArea.Update(msg)
-	cmds = append(cmds, tiCmd)
-
-	// Always ensure we keep listening for messages and participants
-	// This is critical - we must always reattach these commands
-	cmds = append(cmds, m.waitForMessages())
-	cmds = append(cmds, m.waitForParticipants())
-
-	// Keep updating activity status
-	cmds = append(cmds, m.keepAlive())
+	// Keep listening for messages and participants
+	cmds = append(cmds, m.waitForMessages(), m.waitForParticipants(), m.keepAlive())
 
 	return m, tea.Batch(cmds...)
 }
@@ -264,10 +276,7 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *ChatModel) updateMessages() {
 	var sb strings.Builder
 
-	// Debug output to help diagnose issues
-	fmt.Printf("Updating messages view with %d messages\n", len(m.messages))
-
-	for i, msg := range m.messages {
+	for _, msg := range m.messages {
 		// Format timestamp
 		timestamp := time.Unix(msg.Timestamp, 0).Format("15:04:05")
 		timeStr := timestampStyle.Render(timestamp)
@@ -279,23 +288,11 @@ func (m *ChatModel) updateMessages() {
 		// Combine all parts
 		messageText := fmt.Sprintf("%s %s: %s\n", timeStr, senderStr, msg.Text)
 		sb.WriteString(messageText)
-
-		// Debug output for the first and last few messages
-		if i < 3 || i >= len(m.messages)-3 {
-			fmt.Printf("Message %d: %s %s: %s\n", i, timestamp, msg.Sender, msg.Text)
-		}
 	}
 
 	// Update content and ensure we're at the bottom to see new messages
-	content := sb.String()
-	m.msgViewport.SetContent(content)
+	m.msgViewport.SetContent(sb.String())
 	m.msgViewport.GotoBottom()
-	
-	// Force viewport to update immediately
-	m.msgViewport.Update(nil)
-	
-	// Force viewport to update immediately
-	m.msgViewport.Update(nil)
 }
 
 // formatParticipants returns a formatted string of participants
@@ -357,16 +354,33 @@ func (m ChatModel) View() string {
 		return "Disconnected from chat. Goodbye!\n"
 	}
 
+	// Calculate dimensions based on current terminal size
+	mainWidth := int(float64(m.width) * 0.75)
+	sideWidth := m.width - mainWidth - 2
+
+	// Update styles with current dimensions
+	roomHeaderStyle = roomHeaderStyle.Width(m.width)
+	participantsHeaderStyle = participantsHeaderStyle.Width(sideWidth)
+	inputStyle = inputStyle.Width(mainWidth)
+
 	// Format header with room ID
 	header := roomHeaderStyle.Render(fmt.Sprintf("BlueLink Chat - Room: %s", m.roomID))
 
 	// Format participants list
-	participants := m.formatParticipants()
+	participants := lipgloss.NewStyle().
+		Width(sideWidth).
+		PaddingLeft(1).
+		Render(m.formatParticipants())
 
-	// Layout the UI with messages on left, participants on right
+	// Format main chat area
+	mainChat := lipgloss.NewStyle().
+		Width(mainWidth).
+		Render(m.msgViewport.View())
+
+	// Layout the UI with messages on left (75%), participants on right (25%)
 	mainContent := lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		m.msgViewport.View(),
+		mainChat,
 		participants,
 	)
 
@@ -376,7 +390,7 @@ func (m ChatModel) View() string {
 	// Format help text if open
 	help := m.formatHelp()
 
-	// Combine all elements
+	// Combine all elements with proper spacing
 	return fmt.Sprintf("%s\n%s\n%s\n%s", header, mainContent, input, help)
 }
 

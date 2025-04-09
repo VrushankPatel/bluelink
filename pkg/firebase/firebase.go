@@ -215,17 +215,13 @@ func (c *Client) ListenForMessages(roomID string, msgChan chan Message) {
 	go func() {
 		var lastTimestamp int64 = 0
 		var processedMsgIDs = make(map[string]bool)
-		var messageCount int = 0
 
 		// Get all messages initially to find the most recent timestamp
 		messagesRef := c.db.NewRef("rooms").Child(roomID).Child("messages")
 		var initialMessages map[string]Message
 		if err := messagesRef.Get(c.ctx, &initialMessages); err == nil {
-			fmt.Printf("Initial message query returned %d messages\n", len(initialMessages))
-			
 			// Process all initial messages to find the latest timestamp
 			for msgID, msg := range initialMessages {
-				fmt.Printf("Initial message ID: %s, Timestamp: %d\n", msgID, msg.Timestamp)
 				if msg.Timestamp > lastTimestamp {
 					lastTimestamp = msg.Timestamp
 				}
@@ -234,14 +230,10 @@ func (c *Client) ListenForMessages(roomID string, msgChan chan Message) {
 			}
 		}
 
-		fmt.Printf("Starting message listener with lastTimestamp: %d\n", lastTimestamp)
-
 		for {
-			// Get all messages and filter in memory instead of using Firebase queries
+			// Get all messages and filter in memory
 			var messages map[string]Message
 			if err := messagesRef.Get(c.ctx, &messages); err == nil {
-				fmt.Printf("Query returned %d messages\n", len(messages))
-				
 				if len(messages) > 0 {
 					// Convert map to slice for sorting
 					var orderedMsgs []Message
@@ -269,8 +261,6 @@ func (c *Client) ListenForMessages(roomID string, msgChan chan Message) {
 						}
 					}
 
-					fmt.Printf("Found %d new messages to process\n", len(orderedMsgs))
-
 					// Sort messages by timestamp
 					sort.Slice(orderedMsgs, func(i, j int) bool {
 						return orderedMsgs[i].Timestamp < orderedMsgs[j].Timestamp
@@ -279,23 +269,16 @@ func (c *Client) ListenForMessages(roomID string, msgChan chan Message) {
 					// Send each new message to the channel
 					for _, msg := range orderedMsgs {
 						msgChan <- msg
-						// Debug output to confirm messages are being sent
-						messageCount++
-						fmt.Printf("Sent message %d: %s: %s\n", messageCount, msg.Sender, msg.Text)
 					}
 
 					// Update lastTimestamp for next query
 					lastTimestamp = maxTimestamp
-					
+
 					// Periodically clean up the processedMsgIDs map to prevent memory leaks
 					if len(processedMsgIDs) > 1000 {
-						fmt.Printf("Cleaning up processedMsgIDs map (size: %d)\n", len(processedMsgIDs))
-						// Reset the map when it gets too large
 						processedMsgIDs = make(map[string]bool)
 					}
 				}
-			} else if err != nil {
-				fmt.Printf("Error querying messages: %v\n", err)
 			}
 
 			// Sleep before polling again
@@ -395,7 +378,7 @@ func (c *Client) CreateRoomWithID(roomID, userID, username, color string) error 
 // GetInitialMessages gets the most recent messages from a room
 func (c *Client) GetInitialMessages(roomID string) ([]Message, error) {
 	messagesRef := c.db.NewRef("rooms").Child(roomID).Child("messages")
-	
+
 	// Instead of querying by timestamp which requires an index,
 	// just get all messages and sort them in memory
 	var messagesMap map[string]Message
@@ -408,12 +391,8 @@ func (c *Client) GetInitialMessages(roomID string) ([]Message, error) {
 		return []Message{}, nil
 	}
 
-	// Debug output to help diagnose issues
-	fmt.Printf("Retrieved %d initial messages from Firebase\n", len(messagesMap))
-	
 	var messages []Message
-	for msgID, msg := range messagesMap {
-		fmt.Printf("Message ID: %s, Sender: %s, Text: %s\n", msgID, msg.Sender, msg.Text)
+	for _, msg := range messagesMap {
 		messages = append(messages, msg)
 	}
 
