@@ -1,8 +1,15 @@
-# Bluelink
+# BLUELINK
+
+[![Go](https://github.com/VrushankPatel/bluelink/actions/workflows/go.yml/badge.svg)](https://github.com/VrushankPatel/bluelink/actions/workflows/go.yml)
+[![Author](https://img.shields.io/badge/Author-VrushankPatel-blue.svg)](https://github.com/VrushankPatel)
+[![Maintainer](https://img.shields.io/badge/Maintainer-VrushankPatel-green.svg)](https://github.com/VrushankPatel)
+[![Go Version](https://img.shields.io/badge/Go-1.23.8-blue.svg)](https://golang.org)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![UPX](https://img.shields.io/badge/UPX-4.2.4-orange.svg)](https://upx.github.io)
+
+![Bluelink Logo](banner/logo.svg)
 
 A secure terminal-based chat application built with Go and Firebase Realtime Database.
-
-![Bluelink Logo](https://via.placeholder.com/800x400?text=Bluelink+Terminal+Chat)
 
 ## Features
 
