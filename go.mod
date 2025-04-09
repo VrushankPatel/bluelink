@@ -1,6 +1,6 @@
 module github.com/vrushank/bluelink
 
-go 1.23.4
+go 1.23.8
 
 require (
 	firebase.google.com/go/v4 v4.15.2
@@ -65,6 +65,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.34.0 // indirect
 	go.opentelemetry.io/otel/trace v1.34.0 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
+	golang.org/x/exp v0.0.0-20240205201215-2c58cdc269a3 // indirect
 	golang.org/x/net v0.37.0 // indirect
 	golang.org/x/oauth2 v0.28.0 // indirect
 	golang.org/x/sync v0.12.0 // indirect
