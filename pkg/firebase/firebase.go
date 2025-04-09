@@ -15,6 +15,17 @@ import (
 	"google.golang.org/api/option"
 )
 
+// Error messages - defined as variables to avoid string literals in binary
+var (
+	errCredentialsNotFound = errors.New("credentials not found")
+	errRoomNotFound        = errors.New("room not found")
+	errFailedToCreate      = errors.New("failed to create")
+	errFailedToJoin        = errors.New("failed to join")
+	errFailedToLeave       = errors.New("failed to leave")
+	errFailedToSend        = errors.New("failed to send")
+	errFailedToUpdate      = errors.New("failed to update")
+)
+
 // Message represents a chat message
 type Message struct {
 	Sender    string `json:"sender"`
@@ -42,17 +53,14 @@ type Client struct {
 func NewClient() (*Client, error) {
 	ctx := context.Background()
 
-	// Look for Firebase credentials
 	credFile := os.Getenv("FIREBASE_CREDENTIALS")
 	if credFile == "" {
-		// For development, try to find in current directory
 		credFile = "firebase-credentials.json"
 		if _, err := os.Stat(credFile); os.IsNotExist(err) {
-			return nil, errors.New("Firebase credentials not found. Set FIREBASE_CREDENTIALS environment variable to point to your credentials file")
+			return nil, errCredentialsNotFound
 		}
 	}
 
-	// Initialize Firebase app
 	opt := option.WithCredentialsFile(credFile)
 	config := &firebase.Config{
 		DatabaseURL: os.Getenv("FIREBASE_DATABASE_URL"),
@@ -60,13 +68,12 @@ func NewClient() (*Client, error) {
 
 	app, err := firebase.NewApp(ctx, config, opt)
 	if err != nil {
-		return nil, fmt.Errorf("error initializing Firebase app: %w", err)
+		return nil, errFailedToCreate
 	}
 
-	// Get Firebase Realtime Database client
 	db, err := app.Database(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("error initializing Firebase database: %w", err)
+		return nil, errFailedToCreate
 	}
 
 	return &Client{
@@ -78,37 +85,30 @@ func NewClient() (*Client, error) {
 
 // CreateRoom creates a new chat room and returns the room ID
 func (c *Client) CreateRoom(userID, username, color string) (string, error) {
-	// Generate a random 8-digit room ID
 	rand.Seed(time.Now().UnixNano())
 	roomID := strconv.Itoa(10000000 + rand.Intn(90000000))
 
-	// Create room with initial participant
 	roomRef := c.db.NewRef("rooms").Child(roomID)
-
-	// Add creator as first participant
 	participant := Participant{
 		Name:       username,
 		Color:      color,
 		LastActive: time.Now().Unix(),
 	}
 
-	err := roomRef.Child("participants").Child(userID).Set(c.ctx, participant)
-	if err != nil {
-		return "", fmt.Errorf("failed to create room: %w", err)
+	if err := roomRef.Child("participants").Child(userID).Set(c.ctx, participant); err != nil {
+		return "", errFailedToCreate
 	}
 
-	// Add system message
 	welcomeMsg := Message{
 		Sender:    "System",
 		SenderID:  "system",
 		Color:     "#888888",
-		Text:      fmt.Sprintf("%s created the room", username),
+		Text:      username + " created the room",
 		Timestamp: time.Now().Unix(),
 	}
 
-	_, err = roomRef.Child("messages").Push(c.ctx, welcomeMsg)
-	if err != nil {
-		return "", fmt.Errorf("failed to add system message: %w", err)
+	if _, err := roomRef.Child("messages").Push(c.ctx, welcomeMsg); err != nil {
+		return "", errFailedToCreate
 	}
 
 	return roomID, nil
