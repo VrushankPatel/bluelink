@@ -2,7 +2,7 @@
 
 Encrypted, anonymous CLI chat backed by Firebase Realtime Database.
 
-Messages are encrypted with **AES-256-GCM** (key derived from the room ID via SHA-256, random nonce per message). No account required — just a username stored locally.
+Messages are encrypted end-to-end with **AES-256-GCM** (key derived from the room ID, random nonce per message). No account required — just pick a username on first run.
 
 ---
 
@@ -11,43 +11,61 @@ Messages are encrypted with **AES-256-GCM** (key derived from the room ID via SH
 | Tool | Version |
 |------|---------|
 | Java | 17+ |
-| Maven | 3.8+ |
-| Firebase project | Realtime Database enabled |
+| Maven | 3.8+ (build only) |
 
 ---
 
-## Setup
+## Building a shareable JAR
 
-### 1. Firebase credentials
+Anyone who has the JAR can chat — no extra setup needed. The Firebase credentials and database URL are bundled inside at build time.
 
-Download your Firebase service-account JSON from the Firebase console and place it as `firebase-credentials.json` in the working directory, **or** point to it via an environment variable:
+### 1. Add your Firebase credentials
 
-```bash
-export FIREBASE_CREDENTIALS=/path/to/service-account.json
-export FIREBASE_DATABASE_URL=https://<your-project>.firebaseio.com
+Copy your Firebase service-account JSON to:
+
+```
+src/main/resources/firebase-credentials.json
 ```
 
-### 2. Build
+> This file is in `.gitignore` — it will never be committed.
+
+### 2. Set the database URL
+
+Edit `src/main/resources/bluelink.properties`:
+
+```properties
+firebase.database.url=https://<your-project-id>-default-rtdb.firebaseio.com
+```
+
+### 3. Build
 
 ```bash
 mvn package -q
 ```
 
-This produces a fat JAR at `target/bluelink-1.0.0.jar`.
+This produces `target/bluelink-1.0.0.jar` — a self-contained fat JAR with everything bundled in.
+
+### 4. Share
+
+Send `target/bluelink-1.0.0.jar` to anyone. They only need Java 17+:
+
+```bash
+java -jar bluelink-1.0.0.jar
+```
 
 ---
 
 ## Usage
 
 ```bash
-# Create a new room (prints the room ID)
-java -jar target/bluelink-1.0.0.jar
+# Create a new room (prints the room ID — share it with friends)
+java -jar bluelink-1.0.0.jar
 
 # Join an existing room
-java -jar target/bluelink-1.0.0.jar <room-id>
+java -jar bluelink-1.0.0.jar <room-id>
 ```
 
-On first run you will be prompted for a display name. Your identity is saved to `~/.bluelink/config.json`.
+On first run you will be prompted for a display name. Your identity is saved to `~/.bluelink/config.json` — completely local, nothing sent to any server.
 
 ### In-chat commands
 
@@ -62,26 +80,30 @@ On first run you will be prompted for a display name. Your identity is saved to 
 
 ## How it works
 
-1. Each room has an 8-digit numeric ID.
-2. Messages are encrypted before being written to Firebase and decrypted on read — the Firebase backend never sees plaintext.
-3. The encryption key is derived from the room ID, so only people who know the room ID can read the messages.
-4. User identity (ID, display name, color) is stored locally in `~/.bluelink/config.json` — nothing is tied to an account.
+1. Each room has an 8-digit numeric ID — share it out-of-band with whoever you want to chat with.
+2. Messages are encrypted with AES-256-GCM before being written to Firebase. The server never sees plaintext.
+3. The encryption key is derived from the room ID — only people who know the room ID can decrypt messages.
+4. User identity (ID, display name, color) is stored locally in `~/.bluelink/config.json` — no accounts, no sign-up.
 
 ---
 
 ## Project structure
 
 ```
-src/main/java/io/github/vrushankpatel/bluelink/
-├── Main.java               # Entry point, argument parsing
-├── ChatSession.java        # Input loop + message polling
-├── config/
-│   └── UserConfig.java     # Local identity persistence
-└── firebase/
-    ├── FirebaseClient.java # All Firebase Realtime DB operations
-    ├── Crypto.java         # AES-256-GCM encrypt/decrypt
-    ├── Message.java        # Message model
-    └── Participant.java    # Participant model
+src/main/
+├── java/io/github/vrushankpatel/bluelink/
+│   ├── Main.java               # Entry point, argument parsing
+│   ├── ChatSession.java        # Input loop + message polling
+│   ├── config/
+│   │   └── UserConfig.java     # Local identity persistence
+│   └── firebase/
+│       ├── FirebaseClient.java # All Firebase Realtime DB operations
+│       ├── Crypto.java         # AES-256-GCM encrypt/decrypt
+│       ├── Message.java        # Message model
+│       └── Participant.java    # Participant model
+└── resources/
+    ├── firebase-credentials.json  # ← add before building (gitignored)
+    └── bluelink.properties        # ← set firebase.database.url here
 ```
 
 ---

@@ -1,5 +1,6 @@
 # Firebase credentials — never commit these
 firebase-credentials.json
+src/main/resources/firebase-credentials.json
 *-firebase-adminsdk-*.json
 
 # Environment / secrets
@@ -26,11 +27,7 @@ buildNumber.properties
 
 # IDEs
 .idea/
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
+.vscode/
 *.swp
 *.swo
 *~
