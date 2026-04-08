@@ -1,8 +1,23 @@
 # BlueLink
 
+[![Build & Release](https://github.com/VrushankPatel/bluelink/actions/workflows/build.yml/badge.svg)](https://github.com/VrushankPatel/bluelink/actions/workflows/build.yml)
+[![Download](https://img.shields.io/github/v/release/VrushankPatel/bluelink?label=download&color=blue)](https://github.com/VrushankPatel/bluelink/releases/latest)
+
 Encrypted, anonymous CLI chat backed by Firebase Realtime Database.
 
 Messages are encrypted end-to-end with **AES-256-GCM** (key derived from the room ID, random nonce per message). No account required — just pick a username on first run.
+
+---
+
+## Download
+
+Grab the latest JAR from the [Releases page](https://github.com/VrushankPatel/bluelink/releases/latest) and run it — no installation, no config:
+
+```bash
+java -jar bluelink-1.0.0.jar
+```
+
+Requires **Java 17+** only.
 
 ---
 

@@ -1,4 +1,4 @@
-name: Build
+name: Build & Release
 
 on:
   push:
@@ -24,15 +24,63 @@ jobs:
           distribution: "temurin"
           cache: maven
 
+      # Write Firebase credentials from secret into the resources folder
+      # so they get bundled into the fat JAR at build time
+      - name: Write Firebase credentials
+        run: |
+          echo "${{ secrets.FIREBASE_CREDENTIALS_B64 }}" | base64 -d \
+            > src/main/resources/firebase-credentials.json
+
+      # Inject the database URL into bluelink.properties
+      - name: Inject Firebase database URL
+        run: |
+          sed -i "s|firebase.database.url=.*|firebase.database.url=${{ secrets.FIREBASE_DATABASE_URL }}|" \
+            src/main/resources/bluelink.properties
+
       - name: Build fat JAR
         run: mvn package -q --no-transfer-progress
 
-      - name: Verify JAR exists
+      - name: Verify JAR
         run: ls -lh target/bluelink-*.jar
 
+      # Upload as workflow artifact (available on every push)
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bluelink-jar
           path: target/bluelink-*.jar
           retention-days: 7
+
+      # Create/update a rolling "latest" GitHub Release on every push to master
+      - name: Publish GitHub Release
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          JAR=$(ls target/bluelink-*.jar | head -1)
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+
+          # Delete existing "latest" tag/release if present
+          gh release delete latest --yes --repo ${{ github.repository }} 2>/dev/null || true
+          git push origin :refs/tags/latest 2>/dev/null || true
+
+          # Create a fresh release tagged "latest"
+          gh release create latest "$JAR" \
+            --repo ${{ github.repository }} \
+            --title "BlueLink latest (v${VERSION})" \
+            --notes "$(cat <<'EOF'
+          ## Download & run
+
+          Requires **Java 17+** — no other setup needed.
+
+          ```bash
+          java -jar bluelink-${VERSION}.jar
+          ```
+
+          - Run without arguments to **create** a new room (prints the room ID)
+          - Pass a room ID to **join** an existing room: \`java -jar bluelink-${VERSION}.jar <room-id>\`
+
+          Share the JAR with anyone — credentials are bundled in.
+          EOF
+          )" \
+            --latest
