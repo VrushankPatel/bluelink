@@ -70,19 +70,16 @@ jobs:
           gh release create latest "$JAR" \
             --repo ${{ github.repository }} \
             --title "BlueLink latest (v${VERSION})" \
-            --notes "$(cat <<'EOF'
-          ## Download & run
+            --notes "## Download & run
 
-          Requires **Java 17+** — no other setup needed.
+Requires **Java 17+** — no other setup needed.
 
-          ```bash
-          java -jar bluelink-${VERSION}.jar
-          ```
+\`\`\`bash
+java -jar bluelink-${VERSION}.jar
+\`\`\`
 
-          - Run without arguments to **create** a new room (prints the room ID)
-          - Pass a room ID to **join** an existing room: \`java -jar bluelink-${VERSION}.jar <room-id>\`
+- Run without arguments to **create** a new room (prints the room ID)
+- Pass a room ID to **join** an existing room: \`java -jar bluelink-${VERSION}.jar <room-id>\`
 
-          Share the JAR with anyone — credentials are bundled in.
-          EOF
-          )" \
+Share the JAR with anyone — credentials are bundled in." \
             --latest
